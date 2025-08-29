@@ -10,18 +10,69 @@ import (
 	"golang.org/x/net/html"
 )
 
-// Extrai e concatena conteúdo das tags <title>, <h1>, <h2>, <p>
-func extractHTMLContent(path string) (string, error) {
-	tags := map[string]bool{
-		"title": true,
-		"h1":    true,
-		"h2":    true,
-		"p":     true,
+// Tags HTML que serão extraídas
+var tagsExtracao = map[string]bool{
+	"title": true,
+	"h1":    true,
+	"h2":    true,
+	"p":     true,
+}
+
+func main() {
+	pasta := "./aulas"
+	
+	// Verifica se a pasta existe
+	if info, err := os.Stat(pasta); err != nil || !info.IsDir() {
+		fmt.Println("Erro: Pasta não encontrada ou inválida")
+		return
 	}
 
-	var contents []string
+	// Processa a pasta e mostra resultados
+	conteudoPorPasta := make(map[string]string)
+	pastaAtual := ""
 
-	file, err := os.Open(path)
+	filepath.WalkDir(pasta, func(caminho string, entrada fs.DirEntry, err error) error {
+		if err != nil {
+			return nil // Ignora erros e continua
+		}
+
+		if entrada.IsDir() {
+			pastaAtual = caminho
+			//fmt.Println("📁 Pasta:", caminho)
+		} else if strings.HasSuffix(entrada.Name(), ".html") {
+			processarArquivoHTML(caminho, pastaAtual, conteudoPorPasta)
+		} else {
+			fmt.Println("📄 Outro arquivo:", caminho)
+		}
+		return nil
+	})
+
+	mostrarResultados(conteudoPorPasta)
+}
+
+// Processa um arquivo HTML e adiciona ao conteúdo da pasta
+func processarArquivoHTML(caminho, pasta string, conteudoPorPasta map[string]string) {
+	//fmt.Println("✅ Arquivo HTML:", caminho)
+	
+	conteudo, err := extrairConteudoHTML(caminho)
+	if err != nil {
+		fmt.Println("   Erro:", err)
+		return
+	}
+
+	//fmt.Println("📝 Conteúdo:", conteudo)
+	
+	// Adiciona ao conteúdo da pasta
+	if conteudoPorPasta[pasta] != "" {
+		conteudoPorPasta[pasta] += " | " + conteudo
+	} else {
+		conteudoPorPasta[pasta] = conteudo
+	}
+}
+
+// Extrai conteúdo das tags HTML do arquivo
+func extrairConteudoHTML(caminho string) (string, error) {
+	file, err := os.Open(caminho)
 	if err != nil {
 		return "", err
 	}
@@ -32,96 +83,34 @@ func extractHTMLContent(path string) (string, error) {
 		return "", err
 	}
 
-	var traverse func(*html.Node)
-	traverse = func(n *html.Node) {
-		if n.Type == html.ElementNode && tags[n.Data] {
-			if n.FirstChild != nil {
-				text := strings.TrimSpace(n.FirstChild.Data)
-				if text != "" {
-					contents = append(contents, text)
-				}
+	var textos []string
+	var extrair func(*html.Node)
+	
+	extrair = func(n *html.Node) {
+		if n.Type == html.ElementNode && tagsExtracao[n.Data] && n.FirstChild != nil {
+			if texto := strings.TrimSpace(n.FirstChild.Data); texto != "" {
+				textos = append(textos, texto)
 			}
-		}
-		for c := n.FirstChild; c != nil; c = c.NextSibling {
-			traverse(c)
-		}
-	}
-
-	traverse(doc)
-	return strings.Join(contents, ", "), nil
-}
-
-func main() {
-	// Caminho da pasta que você quer ler
-	pasta := "./aulas"
-
-	// Verifica se a pasta existe
-	info, err := os.Stat(pasta)
-	if err != nil {
-		fmt.Println("Erro ao acessar a pasta:", err)
-		return
-	}
-	if !info.IsDir() {
-		fmt.Println("O caminho especificado não é uma pasta.")
-		return
-	}
-
-	// Mapa para armazenar conteúdo por pasta (usando ponteiros para Builder)
-	conteudoPorPasta := make(map[string]*strings.Builder)
-
-	// Variável para controlar a pasta atual
-	pastaAtual := ""
-
-	// Percorre os arquivos e subpastas
-	err = filepath.WalkDir(pasta, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			fmt.Println("Erro ao acessar:", path, err)
-			return err
 		}
 		
-		if d.IsDir() {
-			fmt.Println("📁 Pasta:", path)
-			pastaAtual = path
-		} else {
-			if strings.HasSuffix(strings.ToLower(d.Name()), ".html") {
-				fmt.Println("✅ Arquivo HTML:", path)
-				result, err := extractHTMLContent(path)
-				if err != nil {
-					fmt.Println("Erro ao extrair conteúdo:", err)
-					return nil // Continua processando outros arquivos
-				}
-				fmt.Println("📝 Conteúdo extraído:", result)
-				
-				// Adiciona o conteúdo à pasta correspondente
-				if builder, exists := conteudoPorPasta[pastaAtual]; exists {
-					if builder.Len() > 0 {
-						builder.WriteString(" | ")
-					}
-					builder.WriteString(result)
-				} else {
-					builder := &strings.Builder{}
-					builder.WriteString(result)
-					conteudoPorPasta[pastaAtual] = builder
-				}
-			} else {
-				fmt.Println("📄 Outro arquivo:", path)
-			}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			extrair(c)
 		}
-		return nil
-	})
-
-	if err != nil {
-		fmt.Println("Erro ao percorrer a pasta:", err)
 	}
-
-	// Apresenta todo o conteúdo agrupado por pasta
-	fmt.Println("\n" + strings.Repeat("=", 80))
-	fmt.Println("📚 CONTEÚDO EXTRAÍDO POR PASTA:")
-	fmt.Println(strings.Repeat("=", 80))
 	
+	extrair(doc)
+	return strings.Join(textos, ", "), nil
+}
+
+// Mostra os resultados organizados por pasta
+func mostrarResultados(conteudoPorPasta map[string]string) {
+	/*fmt.Println("\n" + strings.Repeat("=", 50))
+	fmt.Println("📚 CONTEÚDO POR PASTA")
+	fmt.Println(strings.Repeat("=", 50))*/
+
 	for pasta, conteudo := range conteudoPorPasta {
-		fmt.Printf("\n📁 PASTA: %s\n", pasta)
-		fmt.Printf("📝 CONTEÚDO: %s\n", conteudo.String())
-		fmt.Println(strings.Repeat("-", 80))
+		fmt.Println(/*"\n📁 %s\n",*/ pasta)
+		fmt.Println(/*"   %s\n",*/ conteudo)
+		//fmt.Println(strings.Repeat("-", 50))
 	}
 }
